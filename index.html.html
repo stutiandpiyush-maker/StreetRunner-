@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>StreetRunner++ Mobile</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            touch-action: manipulation;
+        }
+        body {
+            background-color: #0f172a;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            border: 4px solid #06b6d4;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            background-color: #0f172a;
+            max-width: 98vw;
+            max-height: 90vh;
+            object-fit: contain;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game State Variables
+let state = 'MENU';
+let difficulty = 'MEDIUM';
+let baseSpeed = 8;
+let speedMult = 0.15;
+let currentSpeed = 8;
+
+let playerX = canvas.width / 2;
+let playerY = 480;
+let playerSpeed = 8;
+let animFrame = 0;
+
+let obstacles = [];
+let score = 0;
+let highScore = 0;
+let roadOffset = 0;
+
+let keys = {};
+
+// Keyboard Listeners
+window.addEventListener('keydown', (e) => {
+    keys[e.key] = true;
+    if (state === 'MENU') {
+        if (e.key === '1') startGame('EASY', 5, 0.08);
+        if (e.key === '2') startGame('MEDIUM', 8, 0.15);
+        if (e.key === '3') startGame('HARD', 12, 0.25);
+    } else if (state === 'GAMEOVER') {
+        if (e.key === ' ' || e.key === 'Enter') state = 'MENU';
+    }
+});
+window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+// Mouse Click Listener
+canvas.addEventListener('click', (e) => {
+    handlePointInput(e.clientX, e.clientY);
+});
+
+// Touch and Swipe Controls
+let touchStartX = 0;
+let touchStartY = 0;
+
+canvas.addEventListener('touchstart', (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+}, { passive: true });
+
+canvas.addEventListener('touchend', (e) => {
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+
+    if (state === 'PLAYING') {
+        // Swipe Detection (>30px threshold)
+        if (Math.abs(deltaX) > 30 && Math.abs(deltaX) > Math.abs(deltaY)) {
+            if (deltaX < 0 && playerX > 180) {
+                playerX -= 60; // Swipe Left
+            } else if (deltaX > 0 && playerX < canvas.width - 180) {
+                playerX += 60; // Swipe Right
+            }
+        } else {
+            // Screen Tap (Left side moves left, Right side moves right)
+            const rect = canvas.getBoundingClientRect();
+            const tapX = (touchEndX - rect.left) * (canvas.width / rect.width);
+            if (tapX < canvas.width / 2 && playerX > 180) {
+                playerX -= 40;
+            } else if (tapX >= canvas.width / 2 && playerX < canvas.width - 180) {
+                playerX += 40;
+            }
+        }
+    } else {
+        handlePointInput(touchEndX, touchEndY);
+    }
+}, { passive: true });
+
+function handlePointInput(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const my = (clientY - rect.top) * (canvas.height / rect.height);
+    
+    if (state === 'MENU') {
+        if (my >= 250 && my <= 300) startGame('EASY', 5, 0.08);
+        else if (my >= 310 && my <= 360) startGame('MEDIUM', 8, 0.15);
+        else if (my >= 370 && my <= 420) startGame('HARD', 12, 0.25);
+    } else if (state === 'GAMEOVER') {
+        state = 'MENU';
+    }
+}
+
+function startGame(diff, base, mult) {
+    difficulty = diff;
+    baseSpeed = base;
+    speedMult = mult;
+    score = 0;
+    obstacles = [];
+    playerX = canvas.width / 2;
+    state = 'PLAYING';
+}
+
+function drawRunner(x, y, frame, isMoving) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.beginPath();
+    ctx.ellipse(x, y + 38, 20, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    const legOffset = isMoving ? Math.sin(frame * 0.3) * 12 : 0;
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 6;
+    ctx.beginPath();
+    ctx.moveTo(x - 8, y + 15);
+    ctx.lineTo(x - 8 - legOffset, y + 38);
+    ctx.moveTo(x + 8, y + 15);
+    ctx.lineTo(x + 8 + legOffset, y + 38);
+    ctx.stroke();
+
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.roundRect(x - 15, y - 20, 30, 35, 6);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(x - 15, y - 10);
+    ctx.lineTo(x - 22 + legOffset, y + 8);
+    ctx.moveTo(x + 15, y - 10);
+    ctx.lineTo(x + 22 - legOffset, y + 8);
+    ctx.stroke();
+
+    ctx.fillStyle = '#fecdd3';
+    ctx.beginPath();
+    ctx.arc(x, y - 30, 11, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#06b6d4';
+    ctx.beginPath();
+    ctx.ellipse(x, y - 35, 14, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawCrate(x, y, size) {
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, 5);
+    ctx.fill();
+
+    ctx.fillStyle = '#b91c1c';
+    ctx.beginPath();
+    ctx.roundRect(x + 5, y + 5, size - 10, size - 10, 3);
+    ctx.fill();
+
+    ctx.strokeStyle = '#fecaca';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x + 4, y + 4);
+    ctx.lineTo(x + size - 4, y + size - 4);
+    ctx.moveTo(x + size - 4, y + 4);
+    ctx.lineTo(x + 4, y + size - 4);
+    ctx.stroke();
+}
+
+function update() {
+    animFrame++;
+
+    if (state === 'PLAYING') {
+        currentSpeed = baseSpeed + (score * speedMult);
+
+        if ((keys['ArrowLeft'] || keys['a'] || keys['A']) && playerX > 180) {
+            playerX -= playerSpeed + (currentSpeed * 0.1);
+        }
+        if ((keys['ArrowRight'] || keys['d'] || keys['D']) && playerX < canvas.width - 180) {
+            playerX += playerSpeed + (currentSpeed * 0.1);
+        }
+
+        roadOffset = (roadOffset + currentSpeed) % 40;
+
+        const spawnRate = Math.max(12, Math.floor(40 - (score * 0.5)));
+        if (Math.floor(Math.random() * spawnRate) === 0) {
+            const lanes = [180, 290, 400, 510, 600];
+            const obsX = lanes[Math.floor(Math.random() * lanes.length)];
+            obstacles.push({ x: obsX, y: -60, size: 50 });
+        }
+
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+            const obs = obstacles[i];
+            obs.y += currentSpeed;
+
+            if (
+                playerX - 15 < obs.x + obs.size &&
+                playerX + 15 > obs.x &&
+                playerY - 30 < obs.y + obs.size &&
+                playerY + 35 > obs.y
+            ) {
+                if (score > highScore) highScore = score;
+                state = 'GAMEOVER';
+            }
+
+            if (obs.y > canvas.height) {
+                obstacles.splice(i, 1);
+                score++;
+            }
+        }
+    }
+}
+
+function render() {
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    if (state === 'MENU') {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#06b6d4';
+        ctx.font = 'bold 48px Arial';
+        ctx.fillText('STREETRUNNER++', canvas.width / 2, 120);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Arial';
+        ctx.fillText('Select Difficulty / Tap Screen:', canvas.width / 2, 200);
+
+        ctx.fillStyle = '#22c55e';
+        ctx.fillText('[ 1 ] EASY - Casual Speed', canvas.width / 2, 280);
+
+        ctx.fillStyle = '#eab308';
+        ctx.fillText('[ 2 ] MEDIUM - Subway Dash', canvas.width / 2, 340);
+
+        ctx.fillStyle = '#ef4444';
+        ctx.fillText('[ 3 ] HARD - Insane Dodge', canvas.width / 2, 400);
+
+        drawRunner(canvas.width / 2, 510, animFrame, false);
+
+    } else if (state === 'PLAYING') {
+        ctx.fillStyle = '#334155';
+        ctx.beginPath();
+        ctx.moveTo(250, 0);
+        ctx.lineTo(550, 0);
+        ctx.lineTo(700, 600);
+        ctx.lineTo(100, 600);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.strokeStyle = '#eab308';
+        ctx.lineWidth = 4;
+        for (let y = -40; y < canvas.height; y += 40) {
+            let lineY = y + roadOffset;
+            ctx.beginPath();
+            ctx.moveTo(350, lineY);
+            ctx.lineTo(350, lineY + 15);
+            ctx.moveTo(450, lineY);
+            ctx.lineTo(450, lineY + 15);
+            ctx.stroke();
+        }
+
+        for (let obs of obstacles) {
+            drawCrate(obs.x, obs.y, obs.size);
+        }
+
+        let isMoving = keys['ArrowLeft'] || keys['a'] || keys['A'] || keys['ArrowRight'] || keys['d'] || keys['D'];
+        drawRunner(playerX, playerY, animFrame, isMoving);
+
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Arial';
+        ctx.fillText(`SCORE: ${score}`, 20, 45);
+
+        ctx.fillStyle = '#eab308';
+        ctx.font = '20px Arial';
+        ctx.fillText(`DIFFICULTY: ${difficulty}`, 20, 80);
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.fillText(`SPEED: ${Math.floor(currentSpeed * 10)} km/h`, 20, 110);
+
+    } else if (state === 'GAMEOVER') {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ef4444';
+        ctx.font = 'bold 48px Arial';
+        ctx.fillText('BUSTED!', canvas.width / 2, 200);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 28px Arial';
+        ctx.fillText(`Final Score: ${score}`, canvas.width / 2, 270);
+
+        ctx.fillStyle = '#eab308';
+        ctx.fillText(`High Score: ${highScore}`, canvas.width / 2, 320);
+
+        ctx.fillStyle = '#06b6d4';
+        ctx.font = '20px Arial';
+        ctx.fillText('Tap Screen or Press Space for Menu', canvas.width / 2, 390);
+    }
+}
+
+function gameLoop() {
+    update();
+    render();
+    requestAnimationFrame(gameLoop);
+}
+
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
